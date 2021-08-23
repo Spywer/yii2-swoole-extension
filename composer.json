@@ -1,0 +1,29 @@
+{
+  "name": "spywer/yii2-swoole-extension",
+  "description": "Running yii2 web application on swoole server",
+  "type": "yii2-extension",
+  "version": "1.0.3",
+  "keywords": [
+    "yii2",
+    "swoole"
+  ],
+  "license": "MIT",
+  "authors": [
+    {
+      "name": "spywer"
+    }
+  ],
+  "minimum-stability": "stable",
+  "require": {
+    "yiisoft/yii2": "~2.0.0"
+  },
+  "require-dev": {
+    "eaglewu/swoole-ide-helper": "dev-master"
+  },
+  "autoload": {
+    "psr-4": {
+      "swoole\\foundation\\": "src/",
+      "tests\\": "tests/"
+    }
+  }
+}
