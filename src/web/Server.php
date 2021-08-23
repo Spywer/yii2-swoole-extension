@@ -13,29 +13,30 @@ use yii\base\BaseObject;
 use yii\base\InvalidConfigException;
 
 /**
+ * Web服务器
  * Class WebServer
  * @package app\servers
  */
 class Server extends BaseObject
 {
     /**
-     * @var string listen address
+     * @var string 监听主机
      */
     public $host = 'localhost';
     /**
-     * @var int listen port
+     * @var int 监听端口
      */
     public $port = 9501;
     /**
-     * @var int process mode
+     * @var int 进程模型
      */
     public $mode = SWOOLE_PROCESS;
     /**
-     * @var int socket type
+     * @var int SOCKET类型
      */
     public $sockType = SWOOLE_SOCK_TCP;
     /**
-     * @var array options for swoole server
+     * @var array 服务器选项
      */
     public $options = [
         'worker_num' => 2,
@@ -43,11 +44,11 @@ class Server extends BaseObject
         'task_worker_num' => 2
     ];
     /**
-     * @var array application configuration
+     * @var array 应用配置
      */
     public $app = [];
     /**
-     * @var \Swoole\Http\Server swoole server instance
+     * @var \Swoole\Http\Server swoole server实例
      */
     public $server;
 
@@ -73,7 +74,7 @@ class Server extends BaseObject
     }
 
     /**
-     * listen swoole events
+     * 事件监听
      * @return array
      */
     public function events()
@@ -82,21 +83,33 @@ class Server extends BaseObject
             'start' => [$this, 'onStart'],
             'workerStart' => [$this, 'onWorkerStart'],
             'workerError' => [$this, 'onWorkerError'],
+            'workerStop' => [$this, 'onWorkerStop'],
+            'workerExit' => [$this, 'onWorkerExit'],
             'request' => [$this, 'onRequest'],
-            'task' => [$this, 'onTask']
+            'task' => [$this, 'onTask'],
+            'managerStart' => [$this, 'onManagerStart'],
+            'finish' => [$this, 'onFinish']
         ];
     }
 
     /**
-     * start the server
+     * 启动服务器
      * @return bool
      */
     public function start()
     {
+		swoole_set_process_name("Yii2 Server: master");
+		
         return $this->server->start();
+    }
+	
+	public function onManagerStart()
+    {
+		swoole_set_process_name("Yii2 Server: manager");
     }
 
     /**
+     * master启动
      * @param \Swoole\Http\Server $server
      */
     public function onStart(\Swoole\Http\Server $server)
@@ -105,8 +118,7 @@ class Server extends BaseObject
     }
 
     /**
-     * initialize Yii application on worker started.
-     * every worker process has a Yii application
+     * 工作进程启动时实例化框架
      * @param \Swoole\Http\Server $server
      * @param int $workerId
      * @throws InvalidConfigException
@@ -114,12 +126,20 @@ class Server extends BaseObject
     public function onWorkerStart(\Swoole\Http\Server $server, $workerId)
     {
         new Application($this->app);
+		
         Yii::$app->set('server', $server);
+		
+		$this->processRename($server, $workerId);
+		
+		echo "Worker# $workerId started" . PHP_EOL;
+		
+		if(Yii::$app->hasModule('worker') && !$server->taskworker && $server->setting['worker_num'] >= 1 && $server->getWorkerId() == 0) {
+			Yii::$app->getModule('worker')->start();
+		}
     }
 
-
     /**
-     * handle worker error
+     * 工作进程异常
      * @param \Swoole\Http\Server $server
      * @param $workerId
      * @param $workerPid
@@ -132,7 +152,7 @@ class Server extends BaseObject
     }
 
     /**
-     * handle web request
+     * 处理请求
      * @param \Swoole\Http\Request $request
      * @param \Swoole\Http\Response $response
      */
@@ -145,7 +165,7 @@ class Server extends BaseObject
     }
 
     /**
-     * dispatch task
+     * 分发任务
      * @param \Swoole\Http\Server $server
      * @param $taskId
      * @param $workerId
@@ -166,4 +186,30 @@ class Server extends BaseObject
             return 1;
         }
     }
+	
+	public function onWorkerStop(\Swoole\Http\Server $server, $workerId)
+    {
+        echo "Worker# $workerId stopped" . PHP_EOL;
+    }
+	
+	public function onWorkerExit(\Swoole\Http\Server $server, $workerId)
+    {
+        echo "Worker# $workerId exit" . PHP_EOL;
+    }
+
+	public function onFinish(\Swoole\Http\Server $server)
+    {
+		echo "Task finished" . PHP_EOL;
+	}
+	
+	protected function processRename(\Swoole\Http\Server $server, $worker_id) {
+
+		if ($server->taskworker) {
+			swoole_set_process_name("Yii2 Server: task");
+		} else {
+			swoole_set_process_name("Yii2 Server: worker");
+		}
+	
+	}
+
 }
