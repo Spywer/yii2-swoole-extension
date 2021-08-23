@@ -133,8 +133,8 @@ class Server extends BaseObject
 		
 		echo "Worker# $workerId started" . PHP_EOL;
 		
-		if(Yii::$app->hasModule('worker') && !$server->taskworker && $server->setting['worker_num'] >= 1 && $server->getWorkerId() == 0) {
-			Yii::$app->getModule('worker')->start();
+		if(Yii::$app->hasModule('tasks') && !$server->taskworker && $server->setting['worker_num'] >= 1 && $server->getWorkerId() == 0) {
+			Yii::$app->getModule('tasks')->start();
 		}
     }
 
