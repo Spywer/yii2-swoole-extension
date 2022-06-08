@@ -1,8 +1,9 @@
 <?php
 
+// Changes made by Spywer
+
 namespace swoole\foundation\web;
 
-use Throwable;
 use Yii;
 use yii\base\InvalidConfigException;
 
@@ -64,38 +65,19 @@ class GrpcServer extends Server
     }
 
     /**
-     * 事件监听
-     * @return array
-     */
-    public function events()
-    {
-        return [
-            'start' => [$this, 'onStart'],
-            'workerStart' => [$this, 'onWorkerStart'],
-            'workerError' => [$this, 'onWorkerError'],
-            'workerStop' => [$this, 'onWorkerStop'],
-            'workerExit' => [$this, 'onWorkerExit'],
-            'request' => [$this, 'onRequest'],
-            'task' => [$this, 'onTask'],
-            'managerStart' => [$this, 'onManagerStart'],
-            'finish' => [$this, 'onFinish']
-        ];
-    }
-
-    /**
      * 启动服务器
      * @return bool
      */
     public function start()
     {
-		swoole_set_process_name("Yii2 GRPC Server: master");
-		
+        swoole_set_process_name("Yii2 GRPC Server: master");
+
         return $this->server->start();
     }
-	
-	public function onManagerStart()
+
+    public function onManagerStart()
     {
-		swoole_set_process_name("Yii2 GRPC Server: manager");
+        swoole_set_process_name("Yii2 GRPC Server: manager");
     }
 
     /**
@@ -116,29 +98,16 @@ class GrpcServer extends Server
     public function onWorkerStart(\Swoole\Http\Server $server, $workerId)
     {
         new Application($this->app);
-		
-        Yii::$app->set('server', $server);
-		
-		$this->processRename($server, $workerId);
-		
-		echo "GRPC Worker# $workerId started" . PHP_EOL;
-		
-		if(Yii::$app->hasModule('tasks') && !$server->taskworker && $server->setting['worker_num'] >= 1 && $server->getWorkerId() == 0) {
-			Yii::$app->getModule('tasks')->start();
-		}
-    }
 
-    /**
-     * 工作进程异常
-     * @param \Swoole\Http\Server $server
-     * @param $workerId
-     * @param $workerPid
-     * @param $exitCode
-     * @param $signal
-     */
-    public function onWorkerError(\Swoole\Http\Server $server, $workerId, $workerPid, $exitCode, $signal)
-    {
-        fprintf(STDERR, "GRPC worker error. id=%d pid=%d code=%d signal=%d\n", $workerId, $workerPid, $exitCode, $signal);
+        Yii::$app->set('server', $server);
+
+        $this->processRename($server, $workerId);
+
+        echo "GRPC Worker# $workerId started" . PHP_EOL;
+
+        if(Yii::$app->hasModule('tasks') && !$server->taskworker && $server->setting['worker_num'] >= 1 && $server->getWorkerId() == 0) {
+            Yii::$app->getModule('tasks')->start();
+        }
     }
 
     /**
@@ -148,58 +117,66 @@ class GrpcServer extends Server
      */
     public function onRequest(\Swoole\Http\Request $request, \Swoole\Http\Response $response)
     {
-        Yii::$app->request->setRequest($request);
-        Yii::$app->response->setResponse($response);
-        Yii::$app->run();
-        Yii::$app->response->clear();
-    }
+        $dispatcher = new \mri\core\Dispatcher();
+        $router = new \mri\core\grpc\Router();
+        $header = new \mri\core\grpc\Header();
 
-    /**
-     * 分发任务
-     * @param \Swoole\Http\Server $server
-     * @param $taskId
-     * @param $workerId
-     * @param $data
-     * @return mixed
-     */
-    public function onTask(\Swoole\Http\Server $server, $taskId, $workerId, $data)
-    {
+        $header->setResponse($response)->init();
+
         try {
-            $handler = $data[0];
-            $params = $data[1] ?? [];
-            list($class, $action) = $handler;
 
-            $obj = new $class();
-            return call_user_func_array([$obj, $action], $params);
-        } catch (Throwable $e) {
-            Yii::$app->errorHandler->handleException($e);
-            return 1;
+            if (trim($request->server['request_uri']) == SWOOLE_CLOSE_KEYWORD) {
+                $response->end();
+                return;
+            }
+
+            $route = $router->setURI($request->server['request_uri'])->route();
+
+            if (is_null($route)) {
+                $errorMessage = "Unknown router, request_uri: " . $request->server['request_uri'];
+                $header->status(\Grpc\STATUS_UNKNOWN, $errorMessage)->getResponse()->end();
+                return;
+            }
+
+            Yii::$app->runAction(
+                $route['controller'] . '/' . $route['action'],
+                ['request' => $dispatcher->handleRequest($route['module'], $route['controller'], $route['action'], $request->rawcontent())]
+            );
+
+            $status = Yii::$app->getResponse()->data['status'] ?? \Grpc\STATUS_OK;
+            $message = Yii::$app->getResponse()->data['message'] ?? '';
+
+            $header->status($status, $message)->getResponse()->end(
+                $dispatcher->handleResponse(Yii::$app->getResponse()->data['data'] ?? [])
+            );
+
+        } catch (\Exception $e) {
+            $header->status(\Grpc\STATUS_INTERNAL, $e->getMessage())->getResponse()->end();
+            return;
         }
     }
-	
-	public function onWorkerStop(\Swoole\Http\Server $server, $workerId)
+
+    public function onWorkerStop(\Swoole\Http\Server $server, $workerId)
     {
         echo "GRPC Worker# $workerId stopped" . PHP_EOL;
     }
-	
-	public function onWorkerExit(\Swoole\Http\Server $server, $workerId)
+
+    public function onWorkerExit(\Swoole\Http\Server $server, $workerId)
     {
         echo "GRPC Worker# $workerId exit" . PHP_EOL;
     }
 
-	public function onFinish(\Swoole\Http\Server $server)
+    public function onFinish(\Swoole\Http\Server $server)
     {
-		echo "GRPC Task finished" . PHP_EOL;
-	}
-	
-	protected function processRename(\Swoole\Http\Server $server, $worker_id) {
+        echo "GRPC Task finished" . PHP_EOL;
+    }
 
-		if ($server->taskworker) {
-			swoole_set_process_name("Yii2 GRPC Server: task");
-		} else {
-			swoole_set_process_name("Yii2 GRPC Server: worker");
-		}
-	
-	}
-
+    protected function processRename(\Swoole\Http\Server $server, $worker_id)
+    {
+        if ($server->taskworker) {
+            swoole_set_process_name("Yii2 GRPC Server: task");
+        } else {
+            swoole_set_process_name("Yii2 GRPC Server: worker");
+        }
+    }
 }
